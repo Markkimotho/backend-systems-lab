@@ -1,8 +1,8 @@
 # Backend Systems Lab
 
-> A portfolio-grade distributed backend system built from scratch in Python — Redis clone, rate limiter, and load balancer working together as a production-style request pipeline.
+> A distributed backend system built from scratch in Python — Redis clone, rate limiter, and load balancer working together as a request pipeline.
 
-**Version:** 1.0 · **Author:** MK (Mark Tinega) · **Status:** Complete · **Date:** March 2026
+**Version:** 1.0
 
 ---
 

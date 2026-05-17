@@ -1,176 +1,197 @@
 @startuml Project_Roadmap_Detailed
 
-title Detailed Project Roadmap with Timelines
+title Backend Systems Lab — Detailed Project Roadmap\nv1.0 · April – July 2026
 
 !define RECTANGLE class
 
-rectangle "Redis Server" as redis {
-    RECTANGLE "Set up environment\nand install Redis\n(Oct 17 - Oct 24, 2024)\n(Week 1)" as redis1
+skinparam rectangle {
+  BackgroundColor #FAFAFA
+  BorderColor #AAAAAA
+  RoundCorner 12
+}
+
+' ═══════════════════════════════════════════════════════════════
+' SYSTEM ARCHITECTURE (top section)
+' ═══════════════════════════════════════════════════════════════
+
+rectangle "System Architecture" as arch #F0F0F0 {
+
+  actor Client
+
+  rectangle "Rate Limiter\n(Token bucket · per IP / endpoint)" as RL #FFE8E0
+  rectangle "Load Balancer\n(Round-robin · health checks · failover)" as LB #EDE8FF
+
+  rectangle "Backend Servers" as SERVERS {
+    rectangle "Server 1" as S1 #E0F5EE
+    rectangle "Server 2" as S2 #E0F5EE
+    rectangle "Server 3" as S3 #E0F5EE
+  }
+
+  rectangle "Redis Clone\n(Shared cache · rate limit counters · sessions)" as REDIS #E0EEF8
+
+  Client --> RL : HTTP request
+  RL --> LB : Allowed request
+  LB --> S1 : Route
+  LB --> S2 : Route
+  LB --> S3 : Route
+
+  S1 --> REDIS : Cache read/write
+  S2 --> REDIS : Cache read/write
+  S3 --> REDIS : Cache read/write
+
+  REDIS ..> RL : Shared counters (feedback)
+
+  note right of RL
+    Checks Redis for current
+    request counts before allowing.
+    Increments counter on each pass.
+    Returns 429 when limit exceeded.
+  end note
+
+  note right of LB
+    Uses Redis for session
+    persistence (sticky routing).
+    Reads server health state.
+    Supports round-robin & least-conn.
+  end note
+
+  note right of REDIS
+    Single source of truth for
+    rate limit state, session IDs,
+    and cached responses.
+    RESP wire protocol over TCP.
+  end note
+}
+
+' ═══════════════════════════════════════════════════════════════
+' MILESTONES — REDIS CLONE
+' ═══════════════════════════════════════════════════════════════
+
+rectangle "Redis Clone" as redis {
+    RECTANGLE "M1: Redis core\n(RESP + store)\n(Apr 1 – Apr 14, 2026)\n(Weeks 1-2)" as redis1
     note right of redis1
-      - Install Redis on the development server.
-      - Configure Redis settings (memory limits, persistence).
-      - Test basic Redis functionality with sample data.
-      - Create a README for setup instructions.
+      - Implement RESP protocol parser & encoder.
+      - Build in-memory Store with TTL support.
+      - Support SET, GET, INCR, DEL, EXISTS commands.
+      - Write unit tests for RESP parsing.
     end note
 
-    RECTANGLE "Serialization and\nDeserialization of RESP\n(Oct 25 - Nov 7, 2024)\n(Weeks 2-3)" as redis2
+    RECTANGLE "M2: Redis server\n+ concurrency\n(Apr 15 – Apr 21, 2026)\n(Week 3)" as redis2
     note right of redis2
-      - Research RESP (REdis Serialization Protocol) format.
-      - Handle different data types (strings, integers, arrays).
-      - Implement serialization and deserialization methods.
-      - Conduct unit tests to validate correctness of RESP parsing.
+      - Build asyncio TCP server on port 6380.
+      - Handle concurrent client connections.
+      - Implement command dispatcher (PING, SET, GET, INCR, DEL, EXISTS).
+      - Test with redis-benchmark (100 concurrent clients).
     end note
 
-    RECTANGLE "Build basic Redis server\n(Nov 8 - Nov 21, 2024)\n(Weeks 4-5)" as redis3
+    RECTANGLE "M3: Advanced commands\n+ tests\n(Apr 22 – Apr 28, 2026)\n(Week 4)" as redis3
     note right of redis3
-      - Create core Redis server logic for handling client connections.
-      - Implement basic commands (GET, SET) with appropriate responses.
-      - Ensure data persistence using RDB (Redis Database) snapshots.
-      - Write unit tests for the core server functionality.
-    end note
-
-    RECTANGLE "Implement Key-Value Storage\n(Nov 22 - Nov 28, 2024)\n(Week 6)" as redis4
-    note right of redis4
-      - Design data structures for efficient in-memory storage (e.g., hash maps).
-      - Handle storage limits and implement eviction policies (LRU, LFU).
-      - Implement storage statistics tracking (memory usage, hit ratio).
-      - Write tests for key-value storage operations.
-    end note
-
-    RECTANGLE "Handle multiple clients\n(Nov 29 - Dec 5, 2024)\n(Week 7)" as redis5
-    note right of redis5
-      - Implement client connection handling using threads or async IO.
-      - Ensure thread safety and manage concurrent access to shared resources.
-      - Test concurrent client connections and measure performance.
-      - Create a monitoring tool to visualize active connections.
-    end note
-
-    RECTANGLE "Add command extensions\n(Dec 6 - Dec 19, 2024)\n(Weeks 8-9)" as redis6
-    note right of redis6
-      - Support for additional commands (EXPIRE, DEL).
-      - Document command usage and performance considerations.
-      - Implement command validation and error handling.
-      - Write integration tests for new commands.
-    end note
-
-    RECTANGLE "Advanced Commands\n(Dec 20 - Dec 26, 2024)\n(Week 10)" as redis7
-    note right of redis7
-      - Implement sorting and transactions (MULTI/EXEC).
-      - Add support for Lua scripting for custom commands.
-      - Write performance benchmarks for advanced commands.
-      - Test advanced commands under heavy load.
-    end note
-
-    RECTANGLE "Performance Testing\n(Dec 27, 2024 - Jan 2, 2025)\n(Week 11)" as redis8
-    note right of redis8
-      - Benchmark performance under simulated load conditions.
-      - Optimize server settings based on benchmarking results.
-      - Identify and fix performance bottlenecks.
-      - Create detailed performance reports for review.
+      - SET ... EX N expiry with lazy eviction.
+      - Atomic INCR under concurrent access.
+      - ERR for unknown commands, graceful handling of malformed input.
+      - >= 10,000 ops/sec benchmark target.
     end note
 }
 
-rectangle "Load Balancer" as load_balancer {
-    RECTANGLE "High-Level Design\nand Requirements\n(Oct 25 - Nov 7, 2024)\n(Weeks 2-3)" as lb1
-    note right of lb1
-      - Define architecture of the load balancer with diagrams.
-      - Identify key requirements (routing, failover, logging).
-      - Create design documentation and review with stakeholders.
-      - Finalize component specifications and interfaces.
-    end note
-
-    RECTANGLE "Implement basic\nload balancer logic\n(Nov 8 - Nov 21, 2024)\n(Weeks 4-5)" as lb2
-    note right of lb2
-      - Develop initial load balancing algorithms (round-robin, least connections).
-      - Implement request forwarding to multiple backend servers.
-      - Set up logging for request handling and performance monitoring.
-      - Conduct unit tests on load balancing logic.
-    end note
-
-    RECTANGLE "Health Checking and\nFailover\n(Nov 22 - Nov 28, 2024)\n(Week 6)" as lb3
-    note right of lb3
-      - Implement health check mechanisms to monitor server status.
-      - Ensure failover to backup servers during downtime.
-      - Test health checking and failover under simulated failures.
-      - Document recovery procedures and monitoring alerts.
-    end note
-
-    RECTANGLE "Advanced Routing\nAlgorithms\n(Dec 1 - Dec 14, 2024)\n(Weeks 7-8)" as lb4
-    note right of lb4
-      - Implement IP hashing and session persistence strategies.
-      - Develop custom routing strategies based on request types.
-      - Benchmark routing performance under varying loads.
-      - Write documentation for routing algorithms.
-    end note
-
-    RECTANGLE "Testing and Optimization\n(Dec 15 - Dec 31, 2024)\n(Weeks 9-11)" as lb5
-    note right of lb5
-      - Perform load testing with various traffic patterns.
-      - Profile the load balancer’s performance and identify bottlenecks.
-      - Optimize algorithm performance for better throughput.
-      - Review and refine design based on testing results.
-    end note
-}
+' ═══════════════════════════════════════════════════════════════
+' MILESTONES — RATE LIMITER
+' ═══════════════════════════════════════════════════════════════
 
 rectangle "Rate Limiter" as rate_limiter {
-    RECTANGLE "Define Rate Limiting Logic\n(Oct 25 - Nov 1, 2024)\n(Week 2)" as rl1
+    RECTANGLE "M4: Rate limiter core\n+ Redis integration\n(Apr 29 – May 12, 2026)\n(Weeks 5-6)" as rl1
     note right of rl1
-      - Research different rate limiting strategies and use cases.
-      - Choose between Token Bucket and Leaky Bucket algorithms.
-      - Define policies for rate limiting (e.g., IP-based, endpoint-based).
-      - Create architectural diagrams for rate limiting components.
+      - Token bucket algorithm via Redis INCR + TTL.
+      - Per-IP rate limiting with rl:{ip}:{endpoint} keys.
+      - aiohttp middleware server on port 8080.
+      - X-RateLimit-Remaining & Retry-After headers.
     end note
 
-    RECTANGLE "Token Bucket or\nLeaky Bucket Algorithm\n(Nov 2 - Nov 15, 2024)\n(Weeks 3-4)" as rl2
+    RECTANGLE "M5: Per-endpoint config\n(May 13 – May 19, 2026)\n(Week 7)" as rl2
     note right of rl2
-      - Implement chosen algorithm with clear thresholds.
-      - Ensure scalability and performance of the implementation.
-      - Create test cases to validate rate limiting functionality.
-      - Conduct stress tests to evaluate rate limiting under load.
-    end note
-
-    RECTANGLE "Integrate Redis\n(Nov 16 - Nov 29, 2024)\n(Weeks 5-6)" as rl3
-    note right of rl3
-      - Store rate limits and user sessions in Redis.
-      - Handle synchronization issues for distributed environments.
-      - Implement Redis-based counters to track request limits.
-      - Test Redis integration in different environments.
-    end note
-
-    RECTANGLE "Add Customization Features\n(Nov 30 - Dec 13, 2024)\n(Weeks 7-8)" as rl4
-    note right of rl4
-      - Allow user-defined rate limits with configurable options.
-      - Support for different user tiers and access levels.
-      - Implement additional configuration options for flexibility.
-      - Validate customization through end-to-end testing.
-    end note
-
-    RECTANGLE "Testing and Error Handling\n(Dec 14 - Dec 21, 2024)\n(Week 9)" as rl5
-    note right of rl5
-      - Perform end-to-end testing of the rate limiter under various scenarios.
-      - Simulate burst requests and validate throttling mechanisms.
-      - Implement robust error handling and logging.
-      - Create monitoring tools to visualize rate limiting performance.
+      - Per-endpoint rate limit overrides.
+      - No INCR on rejected requests (counter unchanged).
+      - Distributed: multiple instances share Redis state.
+      - Burst traffic simulation tests.
     end note
 }
 
-' Connecting milestones within each project
-redis1 --> redis2 : "Finish by Nov 7, 2024"
-redis2 --> redis3 : "Finish by Nov 21, 2024"
-redis3 --> redis4 : "Finish by Nov 28, 2024"
-redis4 --> redis5 : "Finish by Dec 5, 2024"
-redis5 --> redis6 : "Finish by Dec 19, 2024"
-redis6 --> redis7 : "Finish by Dec 26, 2024"
-redis7 --> redis8 : "Finish by Jan 2, 2025"
+' ═══════════════════════════════════════════════════════════════
+' MILESTONES — LOAD BALANCER
+' ═══════════════════════════════════════════════════════════════
 
-lb1 --> lb2 : "Start concurrently with Redis"
-lb2 --> lb3 : "Finish by Nov 28, 2024"
-lb3 --> lb4 : "Finish by Dec 14, 2024"
-lb4 --> lb5 : "Finish by Dec 31, 2024"
+rectangle "Load Balancer" as load_balancer {
+    RECTANGLE "M6: Server pool\n+ round-robin\n(May 20 – Jun 2, 2026)\n(Weeks 8-9)" as lb1
+    note right of lb1
+      - BackendServer model with health status tracking.
+      - Round-robin & least-connections algorithms.
+      - Request forwarding to backend servers (8001-8003).
+      - Active connection counting.
+    end note
 
-rl1 --> rl2 : "Start concurrently with Redis"
-rl2 --> rl3 : "Finish by Nov 29, 2024"
-rl3 --> rl4 : "Finish by Dec 13, 2024"
-rl4 --> rl5 : "Finish by Dec 21, 2024"
+    RECTANGLE "M7: Health checker\n+ failover\n(Jun 3 – Jun 9, 2026)\n(Week 10)" as lb2
+    note right of lb2
+      - Periodic health checks every 5s (configurable).
+      - Mark UNHEALTHY after 3 consecutive failures.
+      - Re-enter pool after 3 successful checks.
+      - Return 503 when all servers unhealthy.
+    end note
+
+    RECTANGLE "M8: Session persistence\nvia Redis\n(Jun 10 – Jun 16, 2026)\n(Week 11)" as lb3
+    note right of lb3
+      - Session cookie pins client to server via Redis.
+      - Clear session when pinned server is unhealthy.
+      - X-Served-By response header.
+      - Graceful drain and recovery support.
+    end note
+}
+
+' ═══════════════════════════════════════════════════════════════
+' MILESTONES — INTEGRATION & POLISH
+' ═══════════════════════════════════════════════════════════════
+
+rectangle "Integration & Polish" as integration {
+    RECTANGLE "M9: Full integration\n+ E2E tests\n(Jun 17 – Jun 30, 2026)\n(Weeks 12-13)" as int1
+    note right of int1
+      - Full pipeline: Client -> RL -> LB -> Server -> Redis.
+      - 150-request burst test (100 OK, 50 rejected 429).
+      - Kill server mid-run -> traffic reroutes.
+      - Redis holds rate limit counters + session mappings.
+    end note
+
+    RECTANGLE "M10: Performance\nbenchmarking\n(Jul 1 – Jul 7, 2026)\n(Week 14)" as int2
+    note right of int2
+      - 500 concurrent clients, 0% error rate (locust).
+      - RL adds <= 2ms latency per request.
+      - LB handles >= 1,000 req/s across 3 servers.
+      - Recovery from server failure within 15s.
+    end note
+
+    RECTANGLE "M11: Docs + polish\n+ v1.0 tag\n(Jul 8 – Jul 14, 2026)\n(Week 15)" as int3
+    note right of int3
+      - Architecture diagrams (hand-drawn style).
+      - README with quickstart & component descriptions.
+      - API docs for HTTP endpoints & RESP commands.
+      - Tag v1.0.0 release.
+    end note
+}
+
+' ═══════════════════════════════════════════════════════════════
+' CONNECTIONS — Critical Path
+' ═══════════════════════════════════════════════════════════════
+
+redis1 --> redis2 : "Finish by Apr 14"
+redis2 --> redis3 : "Finish by Apr 21"
+redis3 --> rl1  : "Redis ready -> Rate Limiter"
+redis2 --> lb1  : "Redis server ready"
+
+rl1 --> rl2   : "Finish by May 12"
+rl2 --> int1  : "Rate Limiter complete"
+
+lb1 --> lb2   : "Finish by Jun 2"
+lb2 --> lb3   : "Finish by Jun 9"
+lb3 --> int1  : "Load Balancer complete"
+
+int1 --> int2 : "Finish by Jun 30"
+int2 --> int3 : "Finish by Jul 7"
 
 @enduml

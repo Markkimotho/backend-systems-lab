@@ -1,0 +1,101 @@
+# ─── Environment shared by all services ───────────────────────────────────────
+x-env: &common-env
+  REDIS_HOST: redis
+  REDIS_PORT: "6380"
+  HEALTH_CHECK_INTERVAL: "5"
+  FORWARD_TIMEOUT: "30"
+  CONNECT_TIMEOUT: "5"
+
+services:
+
+  # ── Redis clone (cache / session store / rate-limit counters) ──────────────
+  redis:
+    build: .
+    command: python -m redis_clone.src.server
+    environment:
+      # REDIS_HOST is intentionally NOT set here — the server binds to
+      # REDIS_BIND (default 0.0.0.0). REDIS_HOST is only for clients.
+      REDIS_PORT: "6380"
+      REQUIREPASS: "${REQUIREPASS:-}"          # set in .env to require AUTH
+      MAX_KEYS: "${MAX_KEYS:-0}"               # 0 = unlimited; e.g. 100000
+    ports:
+      - "6380:6380"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.create_connection(('localhost',6380),2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Backend application servers ────────────────────────────────────────────
+  backend1:
+    build: .
+    command: python shared/mock_server.py 8001
+    environment:
+      <<: *common-env
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+
+  backend2:
+    build: .
+    command: python shared/mock_server.py 8002
+    environment:
+      <<: *common-env
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
+
+  backend3:
+    build: .
+    command: python shared/mock_server.py 8003
+    environment:
+      <<: *common-env
+    ports:
+      - "8003:8003"
+    restart: unless-stopped
+
+  # ── Load balancer ──────────────────────────────────────────────────────────
+  load_balancer:
+    build: .
+    command: python -m load_balancer.src.server
+    environment:
+      <<: *common-env
+      LOAD_BALANCER_PORT: "8090"
+      SERVER_1_HOST: backend1
+      SERVER_2_HOST: backend2
+      SERVER_3_HOST: backend3
+      SERVER_1_PORT: "8001"
+      SERVER_2_PORT: "8002"
+      SERVER_3_PORT: "8003"
+    ports:
+      - "8090:8090"
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend1:
+        condition: service_started
+      backend2:
+        condition: service_started
+      backend3:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Rate limiter (public entry point) ─────────────────────────────────────
+  rate_limiter:
+    build: .
+    command: python -m rate_limiter.src.server
+    environment:
+      <<: *common-env
+      RATE_LIMITER_PORT: "8080"
+      LOAD_BALANCER_HOST: load_balancer
+      LOAD_BALANCER_PORT: "8090"
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      load_balancer:
+        condition: service_started
+    restart: unless-stopped

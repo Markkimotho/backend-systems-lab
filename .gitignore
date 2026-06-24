@@ -34,3 +34,6 @@ dmypy.json
 .pytype/
 .pytype_check/
 .pytype_check_cache/
+
+# MkDocs build output
+_site/

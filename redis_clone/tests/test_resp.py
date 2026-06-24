@@ -1,7 +1,9 @@
 import pytest
 import asyncio
 import io
-from redis_clone.src.resp import parse_resp, encode_resp
+from redis_clone.src.resp import parse_resp, encode_resp, encode_hello
+from redis_clone.src.commands import dispatch
+from redis_clone.src.store import Store
 
 
 class FakeStreamReader:
@@ -118,3 +120,56 @@ def test_encode_nested_list():
 def test_encode_unsupported_type():
     with pytest.raises(TypeError):
         encode_resp(3.14)
+
+
+# --- protocol-aware null encoding (RESP2 vs RESP3) ---
+# Regression: redis-py defaults to RESP3 (DEFAULT_RESP_VERSION = 3) since v5.
+# The RESP3 parser cannot read the RESP2 null `$-1\r\n` and desyncs/times out.
+# Null must be encoded per the negotiated protocol: `_\r\n` for RESP3.
+
+def test_encode_null_resp2_default():
+    assert encode_resp(None) == b'$-1\r\n'
+    assert encode_resp(None, 2) == b'$-1\r\n'
+
+
+def test_encode_null_resp3():
+    assert encode_resp(None, 3) == b'_\r\n'
+
+
+def test_encode_nested_null_follows_proto():
+    # A null inside an array (e.g. a MULTI/EXEC reply with a GET miss) must
+    # also follow the protocol, or the whole array desyncs the client.
+    assert encode_resp([None, 1], 2) == b'*2\r\n$-1\r\n:1\r\n'
+    assert encode_resp([None, 1], 3) == b'*2\r\n_\r\n:1\r\n'
+
+
+# --- HELLO handshake encoding ---
+
+def test_encode_hello_resp3_is_map():
+    out = encode_hello(3)
+    assert out.startswith(b'%7\r\n')      # RESP3 map with 7 fields
+    assert b'proto\r\n:3\r\n' in out      # advertises proto 3
+    assert b'server' in out
+
+
+def test_encode_hello_resp2_is_array():
+    out = encode_hello(2)
+    assert out.startswith(b'*14\r\n')     # RESP2 flat array, 7 key/value pairs
+    assert b'+proto\r\n:2\r\n' in out     # advertises proto 2
+
+
+# --- dispatch null replies follow the connection protocol ---
+
+@pytest.mark.asyncio
+async def test_dispatch_get_miss_resp3_null():
+    """GET on a missing key over RESP3 must reply `_\r\n`, not `$-1\r\n`."""
+    store = Store()
+    assert await dispatch(['GET', 'nope'], store, 3) == b'_\r\n'
+
+
+@pytest.mark.asyncio
+async def test_dispatch_get_miss_resp2_null():
+    store = Store()
+    assert await dispatch(['GET', 'nope'], store, 2) == b'$-1\r\n'
+    # default proto is RESP2
+    assert await dispatch(['GET', 'nope'], store) == b'$-1\r\n'

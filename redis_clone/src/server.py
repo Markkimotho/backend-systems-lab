@@ -3,7 +3,7 @@ import logging
 import os
 import signal
 from .store import Store
-from .resp import parse_resp, encode_resp
+from .resp import parse_resp, encode_resp, encode_hello
 from .commands import dispatch
 
 log = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ async def handle_client(
     authenticated = not bool(REQUIREPASS)  # skip auth when no password is set
     in_multi = False
     queued_cmds: list[list] = []
+    proto = 2  # negotiated RESP version; HELLO bumps it to 3 for modern clients
     try:
         while True:
             cmd = await parse_resp(reader)
@@ -56,6 +57,48 @@ async def handle_client(
                 await writer.drain()
                 continue
 
+            # --- HELLO: protocol negotiation handshake ---
+            # redis-py (RESP3 by default since v5) and redis-cli -3 send HELLO
+            # on connect. Without it the client connection fails and the whole
+            # pipeline 500s. HELLO [protover [AUTH user pass] [SETNAME name]].
+            # It runs before the auth gate because it can carry AUTH itself.
+            if name == 'HELLO':
+                new_proto = proto
+                if len(cmd) > 1:
+                    try:
+                        new_proto = int(cmd[1])
+                    except (ValueError, TypeError):
+                        writer.write(b"-NOPROTO unsupported protocol version\r\n")
+                        await writer.drain()
+                        continue
+                    if new_proto not in (2, 3):
+                        writer.write(b"-NOPROTO unsupported protocol version\r\n")
+                        await writer.drain()
+                        continue
+                # Optional inline AUTH: HELLO <proto> AUTH <user> <pass>
+                i = 2
+                while i < len(cmd):
+                    opt = cmd[i].upper() if isinstance(cmd[i], str) else ''
+                    if opt == 'AUTH' and i + 2 < len(cmd):
+                        if REQUIREPASS and cmd[i + 2] == REQUIREPASS:
+                            authenticated = True
+                        elif REQUIREPASS:
+                            writer.write(b'-WRONGPASS invalid username-password pair or user is disabled.\r\n')
+                            await writer.drain()
+                            break
+                        i += 3
+                    else:
+                        i += 1
+                else:
+                    if not authenticated:
+                        writer.write(b'-NOAUTH HELLO must be called with the client already authenticated, otherwise the HELLO <proto> AUTH <user> <pass> option can be used to authenticate the client and select the RESP protocol version at the same time\r\n')
+                        await writer.drain()
+                        continue
+                    proto = new_proto
+                    writer.write(encode_hello(proto))
+                    await writer.drain()
+                continue
+
             # --- Reject unauthenticated clients ---
             if not authenticated:
                 writer.write(b'-NOAUTH Authentication required.\r\n')
@@ -76,7 +119,7 @@ async def handle_client(
                     continue
                 results = []
                 for queued in queued_cmds:
-                    resp_bytes = await dispatch(queued, store)
+                    resp_bytes = await dispatch(queued, store, proto)
                     results.append(resp_bytes)
                 # Encode as RESP array of raw responses
                 header = f'*{len(results)}\r\n'.encode()
@@ -103,7 +146,7 @@ async def handle_client(
                 await writer.drain()
                 continue
 
-            response = await dispatch(cmd, store)
+            response = await dispatch(cmd, store, proto)
             writer.write(response)
             await writer.drain()
     except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
